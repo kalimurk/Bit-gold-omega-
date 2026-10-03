@@ -1,0 +1,22 @@
+services:
+  backtest:
+    build: .
+    profiles: ["backtest"]
+    command: ["python", "run_backtest.py"]
+    volumes:
+      - ./outputs:/app/outputs
+    # env_file: [".env"]
+
+  paper:
+    build: .
+    profiles: ["paper"]
+    command: ["python", "run_live.py", "--mode", "paper"]
+    # env_file: [".env"]
+
+  dashboard:
+    build: .
+    profiles: ["dashboard"]
+    command: ["python", "run_dashboard.py"]
+    ports:
+      - "8405:8405"
+    # env_file: [".env"]

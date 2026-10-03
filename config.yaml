@@ -1,0 +1,58 @@
+# OBTC example configuration.
+#
+# Copy to your working directory and edit. Any value here can be overridden
+# with an OBTC_-prefixed environment variable; nesting uses a double
+# underscore, e.g. OBTC_EXECUTION__MODE=backtest. A bare name such as
+# OBTC_SYMBOL maps to the matching field (data.symbol).
+
+data:
+  exchange: coinbase        # ccxt exchange id for OHLCV history
+  symbol: BTC/USD           # market to trade
+  timeframes: [1m, 5m, 15m, 1H, 4H, 1D]
+  history_days: 30          # warmup history fetched for backtests
+
+detection:
+  displacement_atr_mult: 1.5
+  range_mult: 1.2
+  atr_period: 14
+  volume_imbalance_mult: 1.5
+  max_wick_pct: 0.40
+
+strategy:
+  enabled:
+    - s1_liquidity_sweep_reversal
+    - s2_continuation
+    - s3_breaker_reclaim
+    - s4_mitigation_flip
+    - s5_turtle_soup
+    - s6_silver_bullet
+    - s7_orderflow_stacking
+
+confluence:
+  threshold: 80.0           # minimum score for an A+ setup
+
+risk:
+  risk_per_trade_pct: 1.0
+  daily_loss_limit_pct: 3.0
+  max_concurrent: 3
+  per_trade_risk_cap_pct: 2.0
+
+execution:
+  mode: paper               # paper | backtest | live
+  fee_bps: 5.0
+  slippage_bps: 2.0
+  starting_equity: 10000.0
+
+dashboard:
+  host: 127.0.0.1
+  port: 8405
+
+alerts:
+  webhook_url: null         # e.g. https://hooks.example.com/obtc
+
+backtest:
+  output_dir: outputs
+
+cache:
+  dir: .cache
+  ttl_s: 3600

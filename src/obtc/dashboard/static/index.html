@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OBTC Chain Dashboard</title>
+<style>
+  body { background:#0b0e14; color:#e6e9f2; font-family:monospace; margin:0; padding:12px; }
+  h1 { font-size:18px; margin:4px 0 8px 0; }
+  #meta { color:#8b93a7; font-size:12px; margin-bottom:8px; }
+  #board { border:1px solid #1a2030; display:block; }
+  .legend { font-size:11px; color:#8b93a7; margin-top:8px; }
+  .legend span { margin-right:14px; }
+</style>
+</head>
+<body>
+<h1>OBTC Chain Dashboard</h1>
+<div id="meta">loading…</div>
+<canvas id="board" width="1200" height="720"></canvas>
+<div class="legend">
+  <span style="color:#4287f5">■ HTF OB</span>
+  <span style="color:#f5a623">■ LTF OB</span>
+  <span style="color:#a371f7">■ Breaker</span>
+  <span style="color:#2ea043">■ FVG</span>
+  <span style="color:#d1242f">- - Sweep level</span>
+  <span style="color:#e3b341">● A+ setup</span>
+</div>
+<script>
+const canvas = document.getElementById('board');
+const ctx = canvas.getContext('2d');
+let chains = [], setups = [];
+
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+async function refresh() {
+  try {
+    const c = await fetchJSON('/chains');
+    const s = await fetchJSON('/setups');
+    chains = c.chains || [];
+    setups = s.setups || [];
+    draw();
+    const aPlus = setups.filter(x => x.is_a_plus).length;
+    document.getElementById('meta').textContent =
+      chains.length + ' chains · ' + setups.length + ' setups (' + aPlus + ' A+) · updated ' +
+      new Date().toLocaleTimeString();
+  } catch (e) { /* keep last rendered frame on transient errors */ }
+}
+
+function priceRange() {
+  let lo = Infinity, hi = -Infinity;
+  const zones = (ch) => [ch.htf_ob, ch.ltf_ob, ch.mtf_breaker].filter(Boolean);
+  for (const ch of chains) {
+    for (const ob of zones(ch)) {
+      lo = Math.min(lo, ob.low); hi = Math.max(hi, ob.high);
+    }
+    if (ch.ltf_fvg) { lo = Math.min(lo, ch.ltf_fvg.bottom); hi = Math.max(hi, ch.ltf_fvg.top); }
+    if (ch.mtf_fvgs) for (const f of ch.mtf_fvgs) {
+      lo = Math.min(lo, f.bottom); hi = Math.max(hi, f.top);
+    }
+    if (ch.liquidity_sweep) { lo = Math.min(lo, ch.liquidity_sweep.level); hi = Math.max(hi, ch.liquidity_sweep.level); }
+  }
+  if (!isFinite(lo)) { lo = 0; hi = 1; }
+  const pad = (hi - lo) * 0.06 || 1;
+  return [lo - pad, hi + pad];
+}
+
+function zoneRect(x, w, yTop, yBot, fill) {
+  ctx.fillStyle = fill;
+  ctx.fillRect(x, yTop, w, Math.max(2, yBot - yTop));
+}
+
+function draw() {
+  const W = canvas.width, H = canvas.height;
+  ctx.fillStyle = '#0b0e14'; ctx.fillRect(0, 0, W, H);
+  const [plo, phi] = priceRange();
+  const y = p => H - 44 - (p - plo) / (phi - plo) * (H - 96);
+
+  // price axis
+  ctx.font = '11px monospace'; ctx.fillStyle = '#8b93a7';
+  for (let i = 0; i <= 8; i++) {
+    const p = plo + (phi - plo) * i / 8;
+    ctx.fillText(p.toFixed(1), 6, y(p) + 4);
+    ctx.strokeStyle = '#141a28'; ctx.beginPath();
+    ctx.moveTo(64, y(p)); ctx.lineTo(W - 12, y(p)); ctx.stroke();
+  }
+
+  const left = 74, right = W - 170;
+  const n = Math.max(1, chains.length);
+  const rowH = Math.min(150, (H - 96) / n);
+
+  chains.forEach((ch, i) => {
+    const top = 52 + i * rowH;
+    const mid = top + rowH / 2;
+    const label = (ch.id || '?').slice(0, 14) + ' ' + (ch.direction || '') + ' ' + (ch.state || '');
+    ctx.fillStyle = '#e6e9f2'; ctx.font = '12px monospace';
+    ctx.fillText(label, left, top + 14);
+
+    // component slots across the row
+    const slots = [ch.htf_ob, ch.mtf_breaker, ch.ltf_ob, ch.ltf_fvg].filter(Boolean);
+    const fills = ['rgba(66,135,245,0.35)', 'rgba(163,113,247,0.35)',
+                   'rgba(245,166,35,0.35)', 'rgba(46,160,67,0.30)'];
+    const keys = ['htf_ob', 'mtf_breaker', 'ltf_ob', 'ltf_fvg'];
+    const centers = [];
+    const slotW = 110, gap = 26;
+    let sx = left;
+    keys.forEach((key, k) => {
+      const comp = ch[key];
+      if (!comp) return;
+      const zTop = comp.high !== undefined ? comp.high : comp.top;
+      const zBot = comp.low !== undefined ? comp.low : comp.bottom;
+      if (zTop === undefined || zBot === undefined) return;
+      zoneRect(sx, slotW, y(zTop), y(zBot), fills[k]);
+      ctx.fillStyle = '#8b93a7'; ctx.font = '10px monospace';
+      ctx.fillText(key.replace('_', ' ').toUpperCase(), sx, top + 28);
+      centers.push([sx + slotW / 2, (y(zTop) + y(zBot)) / 2]);
+      sx += slotW + gap;
+    });
+    // MTF FVGs drawn stacked at the next slot
+    if (ch.mtf_fvgs && ch.mtf_fvgs.length) {
+      ch.mtf_fvgs.slice(0, 3).forEach(f => {
+        if (f.top !== undefined) zoneRect(sx, slotW, y(f.top), y(f.bottom), 'rgba(46,160,67,0.18)');
+      });
+      ctx.fillStyle = '#8b93a7'; ctx.font = '10px monospace';
+      ctx.fillText('MTF FVG x' + ch.mtf_fvgs.length, sx, top + 28);
+      sx += slotW + gap;
+    }
+
+    // link lines between component centers
+    ctx.strokeStyle = '#3a4358'; ctx.setLineDash([4, 3]); ctx.beginPath();
+    centers.forEach((c, k) => { if (k === 0) ctx.moveTo(c[0], c[1]); else ctx.lineTo(c[0], c[1]); });
+    ctx.stroke(); ctx.setLineDash([]);
+
+    // sweep level: red dashed horizontal line across the row
+    if (ch.liquidity_sweep && ch.liquidity_sweep.level !== undefined) {
+      const ly = y(ch.liquidity_sweep.level);
+      ctx.strokeStyle = '#d1242f'; ctx.setLineDash([6, 4]); ctx.beginPath();
+      ctx.moveTo(left, ly); ctx.lineTo(right, ly); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = '#d1242f'; ctx.font = '10px monospace';
+      ctx.fillText('sweep ' + ch.liquidity_sweep.level.toFixed(1), right + 4, ly + 3);
+    }
+
+    // row separator
+    ctx.strokeStyle = '#1a2030'; ctx.beginPath();
+    ctx.moveTo(left - 10, top + rowH); ctx.lineTo(W - 10, top + rowH); ctx.stroke();
+  });
+
+  // A+ setups as gold markers with score, aligned to their chain row
+  const byChain = {};
+  chains.forEach((ch, i) => { byChain[ch.id] = 52 + i * rowH + rowH / 2; });
+  for (const s of setups) {
+    const chainId = (s.signal && s.signal.chain_id) || s.chain_id;
+    const cy = byChain[chainId];
+    if (cy === undefined) continue;
+    const mx = W - 60;
+    ctx.fillStyle = '#e3b341';
+    ctx.beginPath(); ctx.arc(mx, cy, 9, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#0b0e14'; ctx.font = 'bold 9px monospace';
+    const score = (s.score !== undefined ? s.score : 0).toFixed(0);
+    ctx.fillText(score, mx - (score.length > 2 ? 9 : 5), cy + 3);
+    ctx.fillStyle = '#e3b341'; ctx.font = '10px monospace';
+    const name = (s.signal && s.signal.strategy_name) || s.strategy_name || '';
+    ctx.fillText(name.slice(0, 18), mx + 14, cy + 4);
+  }
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
